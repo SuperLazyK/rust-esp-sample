@@ -1,15 +1,3 @@
-//fn main() {
-//    // It is necessary to call this function once. Otherwise some patches to the runtime
-//    // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
-//    esp_idf_svc::sys::link_patches();
-//
-//    // Bind the log crate to the ESP Logging facilities
-//    esp_idf_svc::log::EspLogger::initialize_default();
-//
-//    //log::info!("Hello, world!");
-//    println!("Hello, world!");
-//}
-
 use anyhow::Result;
 use esp_idf_svc::sys::link_patches;
 use esp_idf_svc::hal::{
@@ -22,9 +10,14 @@ use display_interface_spi;
 use std::{thread::sleep, time::Duration};
 use ili9341::DisplayError;
 
+use esp_idf_svc::{
+    hal:: {spi::SpiAnyPins, peripheral::Peripheral},
+    eventloop::EspSystemEventLoop,
+    http::server::EspHttpServer,
+    nvs::EspDefaultNvsPartition,
+    wifi::{BlockingWifi, EspWifi},
+};
 
-use esp_idf_svc::hal::spi::SpiAnyPins;
-use esp_idf_svc::hal::peripheral::Peripheral;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::*;
 use embedded_graphics::pixelcolor::Rgb565;
@@ -32,7 +25,20 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::FONT_10X20;
 use embedded_graphics::text::*;
 
+use core::convert::TryInto;
+
+use embedded_svc::{
+    http::{Headers, Method},
+    io::{Read, Write},
+    wifi::{self, AccessPointConfiguration, AuthMethod},
+};
+
 use ili9341;
+
+use serde::Deserialize;
+
+const SSID: &str = "WIFI_SSID";
+const PASSWORD: &str = "WIFI_PASS";
 
 fn increment(current: i8) -> i8 {
     current.wrapping_add(1)
@@ -67,9 +73,51 @@ where
     let _ = textdrawable.draw(lcd);
 }
 
+
+fn create_server() -> anyhow::Result<EspHttpServer<'static>> {
+    let peripherals = Peripherals::take()?;
+    let sys_loop = EspSystemEventLoop::take()?;
+    let nvs = EspDefaultNvsPartition::take()?;
+
+    let mut wifi = BlockingWifi::wrap(
+        EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
+        sys_loop,
+    )?;
+
+    let wifi_configuration = wifi::Configuration::AccessPoint(AccessPointConfiguration {
+        ssid: SSID.try_into().unwrap(),
+        ssid_hidden: true,
+        auth_method: AuthMethod::WPA2Personal,
+        password: PASSWORD.try_into().unwrap(),
+        channel: CHANNEL,
+        ..Default::default()
+    });
+    wifi.set_configuration(&wifi_configuration)?;
+    wifi.start()?;
+    wifi.wait_netif_up()?;
+
+    info!(
+        "Created Wi-Fi with WIFI_SSID `{}` and WIFI_PASS `{}`",
+        SSID, PASSWORD
+    );
+
+    let server_configuration = esp_idf_svc::http::server::Configuration {
+        stack_size: STACK_SIZE,
+        ..Default::default()
+    };
+
+    // Keep wifi running beyond when this function returns (forever)
+    // Do not call this if you ever want to stop or access it later.
+    // Otherwise it should be returned from this function and kept somewhere
+    // so it does not go out of scope.
+    // https://doc.rust-lang.org/stable/core/mem/fn.forget.html
+    core::mem::forget(wifi);
+
+    Ok(EspHttpServer::new(&server_configuration)?)
+}
+
 fn main() -> Result<()> {
   link_patches();
-
   // Bind the log crate to the ESP Logging facilities
   esp_idf_svc::log::EspLogger::initialize_default();
 
