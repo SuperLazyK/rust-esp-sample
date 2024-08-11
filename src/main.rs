@@ -16,6 +16,7 @@ use esp_idf_svc::{
     http::server::EspHttpServer,
     nvs::EspDefaultNvsPartition,
     wifi::{BlockingWifi, EspWifi},
+    sys::EspError,
 };
 
 use embedded_graphics::prelude::*;
@@ -25,17 +26,16 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::FONT_10X20;
 use embedded_graphics::text::*;
 
+
 use core::convert::TryInto;
 
 use embedded_svc::{
     http::{Headers, Method},
-    io::{Read, Write},
+    io::{Read, Write, Error},
     wifi::{self, AccessPointConfiguration, AuthMethod},
 };
 
 use ili9341;
-
-use serde::Deserialize;
 
 const SSID: &str = "WIFI_SSID";
 const PASSWORD: &str = "WIFI_PASS";
@@ -73,53 +73,98 @@ where
     let _ = textdrawable.draw(lcd);
 }
 
+//fn tcp_server() -> Result<(), Error> {
+//    fn accept() -> Result<(), Error> {
+//        println!("About to bind a simple echo service to port 8080; do `telnet <ip-from-above>:8080`");
+//
+//        let listener = TcpListener::bind("0.0.0.0:8080")?;
+//
+//        for stream in listener.incoming() {
+//            match stream {
+//                Ok(stream) => {
+//                    println!("Accepted client");
+//
+//                    thread::spawn(move || {
+//                        handle(stream);
+//                    });
+//                }
+//                Err(e) => {
+//                    error!("Error: {}", e);
+//                }
+//            }
+//        }
+//
+//        unreachable!()
+//    }
+//
+//    fn handle(mut stream: TcpStream) {
+//        // Read 128 bytes at a time from stream echoing back to stream
+//        loop {
+//            let mut read = [0; 128];
+//
+//            match stream.read(&mut read) {
+//                Ok(n) => {
+//                    if n == 0 {
+//                        // connection was closed
+//                        break;
+//                    }
+//
+//                    let _ = stream.write_all(&read[0..n]);
+//                }
+//                Err(err) => {
+//                    panic!("{}", err);
+//                }
+//            }
+//        }
+//    }
+//
+//    accept()
+//}
 
-fn create_server() -> anyhow::Result<EspHttpServer<'static>> {
-    let peripherals = Peripherals::take()?;
+fn wifi_create() -> Result<esp_idf_svc::wifi::EspWifi<'static>, EspError> {
+    use esp_idf_svc::eventloop::*;
+    use esp_idf_svc::hal::prelude::Peripherals;
+    use esp_idf_svc::nvs::*;
+    use esp_idf_svc::wifi::*;
+
     let sys_loop = EspSystemEventLoop::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
 
-    let mut wifi = BlockingWifi::wrap(
-        EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
-        sys_loop,
-    )?;
+    let peripherals = Peripherals::take()?;
 
-    let wifi_configuration = wifi::Configuration::AccessPoint(AccessPointConfiguration {
+    let mut esp_wifi = EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs.clone()))?;
+    let mut wifi = BlockingWifi::wrap(&mut esp_wifi, sys_loop.clone())?;
+
+    wifi.set_configuration(&Configuration::Client(ClientConfiguration {
         ssid: SSID.try_into().unwrap(),
-        ssid_hidden: true,
-        auth_method: AuthMethod::WPA2Personal,
         password: PASSWORD.try_into().unwrap(),
-        channel: CHANNEL,
         ..Default::default()
-    });
-    wifi.set_configuration(&wifi_configuration)?;
-    wifi.start()?;
-    wifi.wait_netif_up()?;
+    }))?;
 
-    info!(
-        "Created Wi-Fi with WIFI_SSID `{}` and WIFI_PASS `{}`",
-        SSID, PASSWORD
+    wifi.start()?;
+    println!("Wifi started");
+
+    wifi.connect()?;
+    println!("Wifi connected");
+
+    wifi.wait_netif_up()?;
+    println!("Wifi netif up");
+
+    println!(
+        "IP info: {:?} {:?}",
+        wifi.wifi().sta_netif().get_ip_info().unwrap(),
+        wifi.is_connected(),
     );
 
-    let server_configuration = esp_idf_svc::http::server::Configuration {
-        stack_size: STACK_SIZE,
-        ..Default::default()
-    };
-
-    // Keep wifi running beyond when this function returns (forever)
-    // Do not call this if you ever want to stop or access it later.
-    // Otherwise it should be returned from this function and kept somewhere
-    // so it does not go out of scope.
-    // https://doc.rust-lang.org/stable/core/mem/fn.forget.html
-    core::mem::forget(wifi);
-
-    Ok(EspHttpServer::new(&server_configuration)?)
+    Ok(esp_wifi)
 }
 
 fn main() -> Result<()> {
   link_patches();
   // Bind the log crate to the ESP Logging facilities
   esp_idf_svc::log::EspLogger::initialize_default();
+
+  let _wifi = wifi_create();
 
   let peripherals = Peripherals::take()?;
 
