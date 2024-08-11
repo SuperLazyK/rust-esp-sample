@@ -7,8 +7,13 @@ use esp_idf_svc::hal::{
   spi::{SpiConfig, SpiDeviceDriver, SpiDriver, SpiDriverConfig},
 };
 use display_interface_spi;
-use std::{thread::sleep, time::Duration};
+use std::{thread, thread::sleep, time::Duration};
+use std::net::{TcpListener, TcpStream};
+use std::io::{self, Error};
+use std::io::Read;
+use std::io::Write;
 use ili9341::DisplayError;
+
 
 use esp_idf_svc::{
     hal:: {spi::SpiAnyPins, peripheral::Peripheral},
@@ -31,7 +36,7 @@ use core::convert::TryInto;
 
 use embedded_svc::{
     http::{Headers, Method},
-    io::{Read, Write, Error},
+    //io::{Read, Write},
     wifi::{self, AccessPointConfiguration, AuthMethod},
 };
 
@@ -73,53 +78,50 @@ where
     let _ = textdrawable.draw(lcd);
 }
 
-//fn tcp_server() -> Result<(), Error> {
-//    fn accept() -> Result<(), Error> {
-//        println!("About to bind a simple echo service to port 8080; do `telnet <ip-from-above>:8080`");
-//
-//        let listener = TcpListener::bind("0.0.0.0:8080")?;
-//
-//        for stream in listener.incoming() {
-//            match stream {
-//                Ok(stream) => {
-//                    println!("Accepted client");
-//
-//                    thread::spawn(move || {
-//                        handle(stream);
-//                    });
-//                }
-//                Err(e) => {
-//                    error!("Error: {}", e);
-//                }
-//            }
-//        }
-//
-//        unreachable!()
-//    }
-//
-//    fn handle(mut stream: TcpStream) {
-//        // Read 128 bytes at a time from stream echoing back to stream
-//        loop {
-//            let mut read = [0; 128];
-//
-//            match stream.read(&mut read) {
-//                Ok(n) => {
-//                    if n == 0 {
-//                        // connection was closed
-//                        break;
-//                    }
-//
-//                    let _ = stream.write_all(&read[0..n]);
-//                }
-//                Err(err) => {
-//                    panic!("{}", err);
-//                }
-//            }
-//        }
-//    }
-//
-//    accept()
-//}
+fn tcp_server() -> Result<(), Error> {
+    fn accept() -> Result<(), Error> {
+        println!("About to bind a simple echo service to port 8080; do `telnet <ip-from-above>:8080`");
+
+        let listener = TcpListener::bind("0.0.0.0:8080")?;
+
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    println!("Accepted client");
+                    thread::spawn(move || {
+                        handle(stream);
+                    });
+                }
+                Err(e) => {
+                    println!("Error: {}", e);
+                }
+            }
+        }
+        unreachable!()
+    }
+
+    fn handle(mut stream: TcpStream) {
+        // Read 128 bytes at a time from stream echoing back to stream
+        loop {
+            let mut read = [0; 128];
+
+            match stream.read(&mut read) {
+                Ok(n) => {
+                    if n == 0 {
+                        // connection was closed
+                        break;
+                    }
+                    let _ = stream.write_all(&read[0..n]);
+                }
+                Err(err) => {
+                    panic!("{}", err);
+                }
+            }
+        }
+    }
+
+    accept()
+}
 
 fn wifi_create() -> Result<esp_idf_svc::wifi::EspWifi<'static>, EspError> {
     use esp_idf_svc::eventloop::*;
@@ -165,6 +167,7 @@ fn main() -> Result<()> {
   esp_idf_svc::log::EspLogger::initialize_default();
 
   let _wifi = wifi_create();
+  tcp_server()?;
 
   let peripherals = Peripherals::take()?;
 
