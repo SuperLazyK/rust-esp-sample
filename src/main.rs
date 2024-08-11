@@ -141,16 +141,18 @@ fn wifi_create() -> Result<esp_idf_svc::wifi::EspWifi<'static>, EspError> {
     wifi.set_configuration(&Configuration::AccessPoint(AccessPointConfiguration {
         ssid: SSID.try_into().unwrap(),
         ssid_hidden: false,
-        auth_method: AuthMethod::WPA3Personal,
+        auth_method: AuthMethod::WPA2Personal,
         password: PASSWORD.try_into().unwrap(),
+        channel: 11,
         ..Default::default()
     }))?;
 
     wifi.start()?;
     println!("Wifi started");
 
-    wifi.connect()?;
-    println!("Wifi connected");
+    wifi.wait_netif_up()?;
+    //wifi.connect()?;
+    //println!("Wifi connected");
 
     wifi.wait_netif_up()?;
     println!("Wifi netif up");
