@@ -42,8 +42,9 @@ use embedded_svc::{
 
 use ili9341;
 
-const SSID: &str = "WIFI_SSID";
-const PASSWORD: &str = "WIFI_PASS";
+// TODO env with compiler
+const SSID: &str = "M5STACK_SSID";
+const PASSWORD: &str = "xxxxxx5555";
 
 fn increment(current: i8) -> i8 {
     current.wrapping_add(1)
@@ -137,8 +138,10 @@ fn wifi_create() -> Result<esp_idf_svc::wifi::EspWifi<'static>, EspError> {
     let mut esp_wifi = EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs.clone()))?;
     let mut wifi = BlockingWifi::wrap(&mut esp_wifi, sys_loop.clone())?;
 
-    wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+    wifi.set_configuration(&Configuration::AccessPoint(AccessPointConfiguration {
         ssid: SSID.try_into().unwrap(),
+        ssid_hidden: false,
+        auth_method: AuthMethod::WPA3Personal,
         password: PASSWORD.try_into().unwrap(),
         ..Default::default()
     }))?;
